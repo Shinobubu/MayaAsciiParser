@@ -26,3 +26,6 @@ Most Maya scene elements can be loaded with this script. Make sure the Maya scen
 
 ## Nodes Not Importable
 - Script nodes
+
+## Imported Shader groups
+This script will only parse shaders that don't exist in the scene and plug the models to any existing materials.
