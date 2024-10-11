@@ -389,12 +389,13 @@ class MayaAsciiParser():
 					if 'fc'	in ff:
 						currentMode = 'fc'
 						# add face index where this thing lines up with
-						carray = [findex]+list(map(int,ff.split(" ")[1:]))
+						carray = [findex]+list(map(int,ff.split(" ")[2:]))
 						cindex = len(colors)
 						colors.append(carray)
 					if 'h' in ff:
 						currentMode = 'h'
-						harray = list(map(int,ff.split(" ")[1:]))
+						# add face index where this thing lines up with
+						harray = [findex]+list(map(int,ff.split(" ")[2:]))						
 						hindex = len(holes)
 						holes.append(harray)
 					elif 'f' in ff:
@@ -506,21 +507,31 @@ class MayaAsciiParser():
 		#add holes
 		for h in range(len(holes)):
 			holeEdges = holes[h]
+			
 			faceID = -1
 			vertexlist = set()
 			for e in range(len(holeEdges)):
 				if e == 0:					
 					faceID = holeEdges[e]
+					
 				if e > 0 :
-					edgeID,flipped = self.getEdgeID(holeEdges[e])	
-					for ed in range(2):
-						vertexlist.add(edges[edgeID][ed])
+					edgeID,flipped = self.getEdgeID(holeEdges[e])						
+					if flipped:
+						vertexlist.add(edges[edgeID][1])				
+						vertexlist.add(edges[edgeID][0])
+					else:
+						vertexlist.add(edges[edgeID][0])
+						vertexlist.add(edges[edgeID][1])
 			vertexlist = list(vertexlist)
 			points = []
-			for v in range(len(vertexlist)):
+			for v in range(len(vertexlist)):				
 				points.append(verts[vertexlist[v]])
-										
+
+			if flipped:
+				points.reverse()			
 			mesh.addHoles(faceID,points,[len(points)],False)
+			
+			
 
 		uvmapcount = len(uvnames)
 		for uvn in range(uvmapcount):
