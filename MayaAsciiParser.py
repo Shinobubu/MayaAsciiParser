@@ -9,6 +9,20 @@ from importlib import reload
 from maya import cmds
 reload(MayaAsciiParser)
 results = cmds.MayaAsciiImporter('C:/Users/MyAccount/Documents/Maya/projects/myvideogameproject/scenes/cube.ma')
+
+# or with file selection
+
+from MayaAsciiParser import MayaAsciiParser
+from importlib import reload
+from maya import cmds
+reload(MayaAsciiParser)
+fileName=cmds.fileDialog2(ff="Maya Scene (*.ma)",cap='Import Maya Scene', ds=2,fm=1)
+if(fileName != None):
+    startT = cmds.timerX()
+    cmds.MayaAsciiImporter(fileName[0])
+    endT = cmds.timerX()
+    print("Script completed at {0}".format( endT-startT))
+
 '''
 
 import maya.api.OpenMaya as oMaya
@@ -259,6 +273,8 @@ class MayaAsciiParser():
 		allFacesVIDs=[]
 		fs = [] # faceIDs
 		mus = [] # uvfaces		
+		holes = [] # holes
+		colors = [] # colors
 		pointTweaks = dict()
 		materialFaceAssignment = dict()
 		tweaks = []
@@ -360,30 +376,63 @@ class MayaAsciiParser():
 					# empty
 					continue
 				
-				facesData = self.getAttributeValue(lines,'-type "polyFaces" ',";").strip()					
+				facesData = self.getAttributeValue(lines,'-type "polyFaces" ',";").strip()									
 				faces =  re.sub(r"[\t]*", "", facesData).strip().split("\n")
 				
 				# get face components 
-				for ff in faces:
-					
-					if 'f' in ff:
+				currentMode = "f"
+				findex = 0
+				mindex = 0
+				hindex = 0
+				cindex = 0
+				for ff in faces:		
+					if 'fc'	in ff:
+						currentMode = 'fc'
+						# add face index where this thing lines up with
+						carray = [findex]+list(map(int,ff.split(" ")[1:]))
+						cindex = len(colors)
+						colors.append(carray)
+					if 'h' in ff:
+						currentMode = 'h'
+						harray = list(map(int,ff.split(" ")[1:]))
+						hindex = len(holes)
+						holes.append(harray)
+					elif 'f' in ff:
+						currentMode = 'f'	
 						fuarray = list(map(int,ff.split(" ")[1:]))
-						fs.append(fuarray)						
-					if 'mu' in ff:
+						findex = len(fs)
+						fs.append(fuarray)					
+					elif 'mu' in ff:
+						currentMode = 'mu'
 						muarray = list(map(int,ff.split(" ")[1:]))						
+						mindex = len(mus)
 						mus.append(muarray)
+					elif currentMode == 'fc':
+						carray = list(map(int,ff.split(" ")[1:]))
+						colors[cindex] = colors[cindex] + carray
+					elif currentMode == 'h':
+						harray = list(map(int,ff.split(" ")[1:]))						
+						holes[hindex] = holes[hindex] + harray
+					elif currentMode == 'f':						
+						fuarray = list(map(int,ff.split(" ")[1:]))						
+						fs[findex] = fs[findex] + fuarray
+					else:
+						muarray = list(map(int,ff.split(" ")[1:]))						
+						mus[mindex] = mus[mindex] + muarray
 				continue
 
 			#	Normals Component
-			if '".normals' in lines or '".n' in lines:
+			if '".normals' in lines or '".n' in lines:				
 				#normals per face vertex
 				try:
 					normSize = int(self.getAttributeValue(lines,self.longOrShortNames(lines,["-s ","-size "])))	
 				except:
 					pass				
-				normalData = self.getAttributeValue(lines,'-type "float3" ',";").strip()				
-				normalData = list(map( float, re.sub(r"[\n\t]*", "", normalData).split(' ')))				
-				normSize = (len(normalData)/3)
+				if '".normals";' in lines:
+					continue
+				normalData = self.getAttributeValue(lines,'-type "float3" ',";").strip()								
+				normalData = list(map( float, re.sub(r"[\n\t]*", "", normalData).split(' ')))					
+				normSize = int(len(normalData)/3)
 				for n in range(normSize):					
 					vNormal = oMaya.MVector()
 					vNormal.x = normalData[ 0 + (n*3) ]
@@ -427,7 +476,8 @@ class MayaAsciiParser():
 			edgeIDList = []
 			
 			allEdgeConnectionCount.append(pcount)			
-			for eid in range(pcount):				
+			for eid in range(pcount):	
+							
 				edgeID,flipped = self.getEdgeID(fd[1+eid])				
 				
 				if flipped:					
@@ -453,6 +503,25 @@ class MayaAsciiParser():
 					parent = groupOBJ
 					
 		mesh.create( verts , allEdges , allEdgeConnectionCount , allEdgeFaceConnects , allEdgeFaceDesc,  parent=parent.object())		
+		#add holes
+		for h in range(len(holes)):
+			holeEdges = holes[h]
+			faceID = -1
+			vertexlist = set()
+			for e in range(len(holeEdges)):
+				if e == 0:					
+					faceID = holeEdges[e]
+				if e > 0 :
+					edgeID,flipped = self.getEdgeID(holeEdges[e])	
+					for ed in range(2):
+						vertexlist.add(edges[edgeID][ed])
+			vertexlist = list(vertexlist)
+			points = []
+			for v in range(len(vertexlist)):
+				points.append(verts[vertexlist[v]])
+										
+			mesh.addHoles(faceID,points,[len(points)],False)
+
 		uvmapcount = len(uvnames)
 		for uvn in range(uvmapcount):
 			#print("Attempting UV maps ",uvmapcount," ",uvnames[uvn])
@@ -482,9 +551,12 @@ class MayaAsciiParser():
 					if muis[0] == uvn:
 						uvsize.append(muis[1])					
 						vcount = muis[1]									
-						uvids+= muis[2:]				
-				mesh.setUVs(uvw,uvv,uvnames[uvn])			
-				mesh.assignUVs(uvsize,uvids,uvnames[uvn])	
+						uvids+= muis[2:]											
+				mesh.setUVs(uvw,uvv,uvnames[uvn])	
+				try:								
+					mesh.assignUVs(uvsize,uvids,uvnames[uvn])	
+				except:
+					print("Unable to assign UVs to  ",mesh.partialPathName(),uvnames[uvn])
 
 		if len(normals) > 0:			
 			allNormals = oMaya.MVectorArray(normals)						
