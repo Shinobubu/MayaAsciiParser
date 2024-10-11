@@ -261,6 +261,7 @@ class MayaAsciiParser():
 		vertCount = 0
 		uvnames = []
 		uvsets = []
+		uvsetsHoles = dict()
 		verts = []
 		edges = []
 		faces = []				
@@ -274,6 +275,7 @@ class MayaAsciiParser():
 		fs = [] # faceIDs
 		mus = [] # uvfaces		
 		holes = [] # holes
+		#faceHole = dict()
 		colors = [] # colors
 		pointTweaks = dict()
 		materialFaceAssignment = dict()
@@ -381,45 +383,82 @@ class MayaAsciiParser():
 				
 				# get face components 
 				currentMode = "f"
+				currentModeB = "f"
 				findex = 0
 				mindex = 0
 				hindex = 0
 				cindex = 0
-				for ff in faces:		
-					if 'fc'	in ff:
-						currentMode = 'fc'
+				for ff in faces:	
+						
+					if 'mc'	in ff:
+						currentMode = 'mc'
 						# add face index where this thing lines up with
 						carray = [findex]+list(map(int,ff.split(" ")[2:]))
 						cindex = len(colors)
 						colors.append(carray)
-					if 'h' in ff:
+						
+					elif 'h' in ff:
+						# Faces can have multiple holes						
 						currentMode = 'h'
+						currentModeB = currentMode
 						# add face index where this thing lines up with
+
 						harray = [findex]+list(map(int,ff.split(" ")[2:]))						
 						hindex = len(holes)
 						holes.append(harray)
+
+						#faceHole[findex] = list(map(int,ff.split(" ")[1:]))
+						
 					elif 'f' in ff:
 						currentMode = 'f'	
+						currentModeB = currentMode
 						fuarray = list(map(int,ff.split(" ")[1:]))
 						findex = len(fs)
 						fs.append(fuarray)					
+						
 					elif 'mu' in ff:
-						currentMode = 'mu'
-						muarray = list(map(int,ff.split(" ")[1:]))						
-						mindex = len(mus)
-						mus.append(muarray)
-					elif currentMode == 'fc':
+						# check if this UV is for a face or a hole.		
+						currentMode = 'mu'				
+						if currentModeB == 'f':
+							muarray = list(map(int,ff.split(" ")[1:]))																				
+							mindex = len(mus)
+							mus.append(muarray)
+						else:							
+							# hole , figure out multi uvs 
+							muarray = list(map(int,ff.split(" ")[1:]))	
+							try:
+								uvsetsHoles[findex].append(muarray)
+							except:
+								uvsetsHoles[findex] = [muarray]
+						
+					
+					elif currentMode == 'mc':
 						carray = list(map(int,ff.split(" ")[1:]))
 						colors[cindex] = colors[cindex] + carray
+						
 					elif currentMode == 'h':
 						harray = list(map(int,ff.split(" ")[1:]))						
-						holes[hindex] = holes[hindex] + harray
+						holes[hindex] += harray
+
+						#faceHole[findex] += harray	
+						
 					elif currentMode == 'f':						
 						fuarray = list(map(int,ff.split(" ")[1:]))						
-						fs[findex] = fs[findex] + fuarray
-					else:
-						muarray = list(map(int,ff.split(" ")[1:]))						
-						mus[mindex] = mus[mindex] + muarray
+						fs[findex] += fuarray
+						
+					elif currentMode == "mu":
+						if currentModeB == 'f':
+							muarray = list(map(int,ff.split(" ")[1:]))						
+							mus[mindex] += muarray
+						else:
+							#todo: holes
+							
+							muarray = list(map(int,ff.split(" ")[1:]))						
+							uvsetsHoles[findex][-1] += muarray
+						
+							
+							
+					
 				continue
 
 			#	Normals Component
@@ -476,7 +515,7 @@ class MayaAsciiParser():
 			faceVIDs = [0] * pcount
 			edgeIDList = []
 			
-			allEdgeConnectionCount.append(pcount)			
+					
 			for eid in range(pcount):	
 							
 				edgeID,flipped = self.getEdgeID(fd[1+eid])				
@@ -488,6 +527,43 @@ class MayaAsciiParser():
 					faceVIDs[eid] = int(edges[edgeID][0])
 					allEdgeFaceDesc.append(0) 				
 				edgeIDList.append(edgeID)
+
+			hcount = 0	
+			'''
+			try:
+				hcount = faceHole[f][0]
+				holeedges = faceHole[f][1:]				
+			except:
+				hcount = 0		
+
+			if(hcount > 0):
+				# this is WEIRD. to start a hole the vertexes needs to loop again
+				
+				edgeID,flipped = self.getEdgeID(fd[1])		
+
+				if flipped:					
+					faceVIDs[eid] = int(edges[edgeID][1])
+					allEdgeFaceDesc.append(1) 					
+				else:
+					faceVIDs[eid] = int(edges[edgeID][0])
+					allEdgeFaceDesc.append(0) 	
+								
+				edgeIDList.append(edgeID)
+				
+				for h in range(hcount+1):
+					hh = h % hcount # just like the perimiter the hole has to close					
+					edgeID,flipped = self.getEdgeID(holeedges[hh])
+					if flipped:
+						faceVIDs.append(int(edges[edgeID][1]))
+						allEdgeFaceDesc.append(1) 					
+					else:
+						faceVIDs.append(int(edges[edgeID][0]))
+						allEdgeFaceDesc.append(0) 											
+					edgeIDList.append(edgeID)				
+				# finish hole				
+				hcount += 2
+			'''
+			allEdgeConnectionCount.append(pcount+hcount)	
 			allFacesVIDs = allFacesVIDs + faceVIDs
 			allEdgeFaceConnects = allEdgeFaceConnects + edgeIDList
 					
@@ -504,35 +580,33 @@ class MayaAsciiParser():
 					parent = groupOBJ
 					
 		mesh.create( verts , allEdges , allEdgeConnectionCount , allEdgeFaceConnects , allEdgeFaceDesc,  parent=parent.object())		
+		
 		#add holes
 		for h in range(len(holes)):
 			holeEdges = holes[h]
 			
 			faceID = -1
-			vertexlist = set()
+			vertexlist = []#set()
 			for e in range(len(holeEdges)):
 				if e == 0:					
 					faceID = holeEdges[e]
 					
+					
 				if e > 0 :
-					edgeID,flipped = self.getEdgeID(holeEdges[e])						
+					edgeID,flipped = self.getEdgeID(holeEdges[e])					
 					if flipped:
-						vertexlist.add(edges[edgeID][1])				
-						vertexlist.add(edges[edgeID][0])
+						vertexlist.append(edges[edgeID][1])										
 					else:
-						vertexlist.add(edges[edgeID][0])
-						vertexlist.add(edges[edgeID][1])
-			vertexlist = list(vertexlist)
+						vertexlist.append(edges[edgeID][0])				
+						
+									
+			#vertexlist = list(vertexlist)
 			points = []
 			for v in range(len(vertexlist)):				
 				points.append(verts[vertexlist[v]])
-
-			if flipped:
-				points.reverse()			
-			mesh.addHoles(faceID,points,[len(points)],False)
-			
-			
-
+									
+			mesh.addHoles(faceID,points,[len(points)],False)						
+		
 		uvmapcount = len(uvnames)
 		for uvn in range(uvmapcount):
 			#print("Attempting UV maps ",uvmapcount," ",uvnames[uvn])
@@ -558,12 +632,29 @@ class MayaAsciiParser():
 					uvw.append(u)
 					uvv.append(v)				
 				uvids = []
-				for muis in mus:				
-					if muis[0] == uvn:
-						uvsize.append(muis[1])					
-						vcount = muis[1]									
-						uvids+= muis[2:]											
+				faceID = 0
+				for m in range(len(mus)):									
+					muis = mus[m]					
+					if muis[0] == uvn:	
+						vcount = muis[1]					
+						uvsize.append(vcount)																				
+						uvids += muis[2:]	
+						
+						try:
+							#handles multiple holes per face
+							holeFaceUV = uvsetsHoles[faceID]
+							for hUV in range(len(holeFaceUV)):
+								if holeFaceUV[hUV][0] == uvn:									
+									uvsize[-1] = uvsize[-1] + holeFaceUV[hUV][1]						
+									uvids += holeFaceUV[hUV][2:]
+						except:
+							pass
+						
+						faceID += 1
+
+				# // Todo add holes in UV
 				mesh.setUVs(uvw,uvv,uvnames[uvn])	
+
 				try:								
 					mesh.assignUVs(uvsize,uvids,uvnames[uvn])	
 				except:
@@ -598,7 +689,8 @@ class MayaAsciiParser():
 		for m in range(len(otherAttribs)):
 			refabstring = otherAttribs[m].replace('".', '"{0}.'.format(meshName)).strip()	
 			mel.eval(refabstring)
-			
+
+		# Color sets			
 
 		return mesh, materialFaceAssignment, tweaks
 	
