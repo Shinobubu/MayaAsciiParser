@@ -30,7 +30,7 @@ if(fileName != None):
 Most Maya scene elements can be loaded with this script. Make sure the Maya scene files are not binary 
 
 ## Limitations
-- Meshes with polyholes (work in progress)
+- Meshes with Color vertexes
 
 ## Scene Compatible
 - Skinned Models
