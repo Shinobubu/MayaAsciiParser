@@ -29,6 +29,9 @@ if(fileName != None):
 
 Most Maya scene elements can be loaded with this script. Make sure the Maya scene files are not binary 
 
+## Limitations
+- Meshes with polyholes (work in progress)
+
 ## Scene Compatible
 - Skinned Models
 - NURBS surfaces
