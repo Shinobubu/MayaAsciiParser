@@ -280,6 +280,8 @@ class MayaAsciiParser():
 		
 		materialFaceAssignment = dict()
 		tweaks = []
+				
+		
 		commandlines = maMel.split(";")		
 		otherAttribs = []
 		for i in range(len(commandlines)):			
@@ -467,10 +469,13 @@ class MayaAsciiParser():
 					normSize = int(self.getAttributeValue(lines,self.longOrShortNames(lines,["-s ","-size "])))	
 				except:
 					pass				
-				if '".normals";' in lines:
+				if '".normals";' in lines or '".n";' in lines:
 					continue
-				normalData = self.getAttributeValue(lines,'-type "float3" ',";").strip()								
-				normalData = list(map( float, re.sub(r"[\n\t]*", "", normalData).split(' ')))					
+				normalData = self.getAttributeValue(lines,'-type "float3" ',";").strip()	
+				try:							
+					normalData = list(map( float, re.sub(r"[\n\t]*", "", normalData).split(' ')))					
+				except Exception as e:
+					raise Exception("problem parsing normal data ",lines)
 				normSize = int(len(normalData)/3)
 				for n in range(normSize):					
 					vNormal = oMaya.MVector()
@@ -631,19 +636,35 @@ class MayaAsciiParser():
 				except:
 					print("Unable to assign UVs to  ",mesh.partialPathName(),uvnames[uvn])
 
-		if len(normals) > 0:			
-			allNormals = oMaya.MVectorArray(normals)						
-			#condense the perFace vertex normals to a per Vertex shared normals.			
-			allFacesVIDs = oMaya.MIntArray(allFacesVIDs)
-			# this doesn't work.  setFaceVertexNormals is bugged
-			#
-			# mesh.setFaceVertexNormals(allNormals,allFaceIDs,allFacesVIDs)		
-			#
-			# this is the work around to do it per vertex
-			#
-			for aindex in range(len(allFacesVIDs)):
-				vindex = allFacesVIDs[aindex]				
-				mesh.setVertexNormal(allNormals[aindex],vindex)
+		# if normals counts equal to vertex count it means per vertex normals
+		if len(normals) == vertCount:
+			for aindex in range(len(normals)):
+				try:
+					mesh.setVertexNormal(normals[aindex],aindex)
+				except Exception as e:
+					pass
+					#print("missing normals ",aindex)
+					#raise Exception(" failed normals ",e," ",normals)			
+		else:
+			if len(normals) > 0:			
+				allNormals = oMaya.MVectorArray(normals)						
+				#condense the perFace vertex normals to a per Vertex shared normals.			
+				allFacesVIDs = oMaya.MIntArray(allFacesVIDs)
+				# this doesn't work.  setFaceVertexNormals is bugged
+				#
+				# mesh.setFaceVertexNormals(allNormals,allFaceIDs,allFacesVIDs)		
+				#
+				# this is the work around to do it per vertex
+				#
+				for aindex in range(len(allFacesVIDs)):
+					vindex = allFacesVIDs[aindex]		
+					try:		
+						mesh.setVertexNormal(allNormals[aindex],vindex)
+					except:
+						pass
+						#print("vindex missing ",vindex)
+					
+			
 					
 			
 						
@@ -656,9 +677,8 @@ class MayaAsciiParser():
 		mesh.cleanupEdgeSmoothing()		
 		mesh.updateSurface()		
 		meshName = mesh.name()
-
 		colorDictionary = dict()
-
+		
 		for m in range(len(otherAttribs)):
 			refabstring = otherAttribs[m].replace('".', '"{0}.'.format(meshName)).strip()	
 			refabstring = re.sub(r"[\n\t;]*", "", refabstring)
@@ -669,7 +689,7 @@ class MayaAsciiParser():
 				else:
 					colorSetIndex = int(self.getAttributeValue(refabstring,'.clst[','].clsn"'))						
 				if colorSetIndex not in colorDictionary.keys():
-					colorDictionary[colorSetIndex] = [colorName,4,oMaya.MColorArray(),oMaya.MColorArray(),list(),list()] # 4 channels , ColorPoints, Output Colors, OutputFaceIDs , OutputVertexIDs
+					colorDictionary[colorSetIndex] = [colorName,4,list(),oMaya.MColorArray(),list(),list()] # 4 channels , ColorPoints, Output Colors, OutputFaceIDs , OutputVertexIDs
 			if ('.colorSet' in refabstring and '.representation' in refabstring) or ('.clst' in refabstring and '.rprt' in refabstring):
 				if 'representation' in refabstring:
 					colorSetIndex = int(self.getAttributeValue(refabstring,'.colorSet[','].representation'))
@@ -684,26 +704,20 @@ class MayaAsciiParser():
 					# sometimes if there is a construction history for the color set the representation becomes a place holder.
 					pass
 			elif ('.colorSetPoints' in refabstring) or ('.clsp' in refabstring):
+				refab = refabstring+";"
+				if ('.clsp";' in refab) or ('.colorSetPoints";' in refab):							
+					continue
+
 				if '.colorSetPoints' in refabstring:
 					colorSetIndex = int(self.getAttributeValue(refabstring,'.colorSet[','].colorSetPoints'))
 				else:
 					colorSetIndex = int(self.getAttributeValue(refabstring,'.clst[','].clsp'))
-				colorValues = self.getAttributeValue(refabstring+";",']"  ' ,";").split(" ")
+
+				colorValues = self.getAttributeValue(refabstring+";",']" ',"; ").split(" ")
+				colorValues = list(filter(None, colorValues))
+				#tokenize array of numbers				
+				colorDictionary[colorSetIndex][2] += colorValues; #colorLists
 				
-				#tokenize array of numbers
-				colorRep = colorDictionary[colorSetIndex][1]
-				colorIndexes = int(len(colorValues) / colorRep)
-				colorLists = []
-				for c in range(colorIndexes):
-					mColor = oMaya.MColor()
-					mColor.r = float(colorValues[ (c * colorRep) + 0 ])
-					mColor.g = float(colorValues[ (c * colorRep) + 1 ])
-					mColor.b = float(colorValues[ (c * colorRep) + 2 ])
-					if colorRep > 3:
-						mColor.a = float(colorValues[ (c * colorRep) + 3 ])					
-					colorLists.append(mColor)
-				colorDictionary[colorSetIndex][2] = colorLists
-				continue
 
 			try:
 				mel.eval(refabstring)
@@ -718,7 +732,22 @@ class MayaAsciiParser():
 		outputColors = 3
 		outputColorFaces = 4
 		outputColorVertexes = 5
-		
+		#tokenize values
+		for colorSetIndex,value in colorDictionary.items():
+			colorValues = colorDictionary[colorSetIndex][2]
+			colorRep = colorDictionary[colorSetIndex][1]
+			colorIndexes = int(len(colorValues) / colorRep)
+			colorLists = []
+			
+			for c in range(colorIndexes):
+				mColor = oMaya.MColor()
+				mColor.r = float(colorValues[ (c * colorRep) + 0 ])
+				mColor.g = float(colorValues[ (c * colorRep) + 1 ])
+				mColor.b = float(colorValues[ (c * colorRep) + 2 ])
+				if colorRep > 3:
+					mColor.a = float(colorValues[ (c * colorRep) + 3 ])					
+				colorLists.append(mColor)
+			colorDictionary[colorSetIndex][2] = colorLists
 
 		for faceID,value in colors.items():					
 			faceColors = value			
@@ -748,8 +777,10 @@ class MayaAsciiParser():
 					colorDictionary[colorSetIndex][outputColorVertexes])
 			mesh.updateSurface()
 		
-		mesh.setCurrentColorSetName( defaultColor )		
-				
+		try:
+			mesh.setCurrentColorSetName( defaultColor )		
+		except:
+			pass
 				
 
 		return mesh, materialFaceAssignment, tweaks
@@ -857,8 +888,9 @@ class MayaAsciiParser():
 			@param[in]: Array of Mesh Nodes in maya Ascii createnodes			
 		'''
 		ms = []		
+		
 		for i in range(0,len(parsedlist),2):
-			meshName = self.getNodeName(parsedlist[i])
+			meshName = self.getNodeName(parsedlist[i])						
 			parentName = parsedlist[i+1]								
 			oldMeshName = meshName			
 			meshOBJ,faceMaterial,vertextweaks = self.parseMesh(parsedlist[i] )												
@@ -1122,8 +1154,7 @@ class MayaAsciiParser():
 			nodeType = self.getTypeName(otherlist[o])
 			nodeName = self.getNodeName(otherlist[o])
 			#filter out shaders and shape transforms
-			skip = False
-
+			skip = False			
 			if cmds.objExists(nodeName) and nodeType in self.nodeNoDuplicate:
 				continue
 			if nodeType in exception:
@@ -1300,7 +1331,7 @@ class MayaAsciiParser():
 			outblend.append(index)
 			shapeDirectory.append(index)			
 			blendshapeName = blendShapes[b][1] # result names
-			cmds.connectAttr( '{0}.midLayerParent'.format(blendshapeName), 'shapeEditorManager.blendShapeParent[{0}]'.format(str(index)) )
+			#cmds.connectAttr( '{0}.midLayerParent'.format(blendshapeName), 'shapeEditorManager.blendShapeParent[{0}]'.format(str(index)) )
 			cmds.connectAttr( 'shapeEditorManager.outBlendShapeVisibility[{0}]'.format(str(index)), '{0}.targetDirectory[0].directoryParentVisibility'.format(blendshapeName) )
 			cmds.setAttr('shapeEditorManager.blendShapeDirectory[0].childIndices',  shapeDirectory, type='Int32Array')
 
@@ -1325,18 +1356,24 @@ class MayaAsciiParser():
 		self.__namedictionary__ = dict()
 		self.__namedictionary__["initialShadingGroup"] = "initialShadingGroup"
 		others=[]
-
+		exceptions = []
 		file1 = open(asciipath, "r")
 		file1strings = file1.read()
+		# Remove special characters
+		file1strings = re.sub('&lf;', "", file1strings)	
+		file1strings = re.sub('&cr;', "", file1strings)			
+		
+
 		nodes = file1strings.split("createNode ")				
 		connections = self.getAllConnectAttr(file1strings)
 		meshlist,shaderlist,skins,transforms,othernodes = self.filterNodes(nodes,connections)				
 		shaderlist,shaderAlreadyExists = self.findExistingShaders(shaderlist)					
 		self.createTransformNodes(transforms)		
+		others,blendshapes = self.createOtherNodes(othernodes,exceptions)	
 		self.createMeshNodes(meshlist)		
 		self.createShaderNodes(shaderlist)
 		skins = self.createSkins(skins)
-		exceptions = []
+		
 		for ex in shaderlist:
 			shaderType = self.getTypeName(ex[1])
 			exceptions.append(shaderType)
@@ -1344,7 +1381,7 @@ class MayaAsciiParser():
 			shaderType = ex[2]
 			exceptions.append(shaderType)
 
-		others,blendshapes = self.createOtherNodes(othernodes,exceptions)		
+			
 
 		for s in range(len(skins)):
 			others.append( skins[s][0] )
