@@ -29,8 +29,9 @@ if(fileName != None):
 
 Most Maya scene elements can be loaded with this script. Make sure the Maya scene files are not binary 
 
-## Limitations
-- Meshes with Color vertexes
+## Limitations/Bugs
+- Multiple color sets always results in colors from previous set appearing on the next set
+- Objects with multiple shape nodes (like original meshes) have unpredictable results.
 
 ## Scene Compatible
 - Skinned Models
@@ -41,6 +42,8 @@ Most Maya scene elements can be loaded with this script. Make sure the Maya scen
 - Nested Groups
 - Meshes with multiple material faces
 - Shaders
+- Models with face holes
+- Vertex/Face Colorsets
 
 ## Nodes Not Importable
 - Script nodes
