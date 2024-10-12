@@ -264,7 +264,8 @@ class MayaAsciiParser():
 		uvsetsHoles = dict()
 		verts = []
 		edges = []
-		faces = []				
+		faces = []	
+		faceVertexIDs=[]			
 		normals = []
 		normals2 = []				
 		allEdges = []
@@ -274,10 +275,9 @@ class MayaAsciiParser():
 		allFacesVIDs=[]
 		fs = [] # faceIDs
 		mus = [] # uvfaces		
-		holes = [] # holes
-		#faceHole = dict()
-		colors = [] # colors
-		pointTweaks = dict()
+		holes = [] # holes		
+		colors = dict() # colors		
+		
 		materialFaceAssignment = dict()
 		tweaks = []
 		commandlines = maMel.split(";")		
@@ -367,7 +367,7 @@ class MayaAsciiParser():
 				continue
 
 			# Face Component
-			if  '".face' in lines or '".fc' in lines:				
+			if  '".face' in lines or '".fc' in lines:						
 				# parse Faces				
 				try:
 					tempC = int(self.getAttributeValue(lines,self.longOrShortNames(lines,["-s ","-size "])))	
@@ -379,8 +379,7 @@ class MayaAsciiParser():
 					continue
 				
 				facesData = self.getAttributeValue(lines,'-type "polyFaces" ',";").strip()									
-				faces =  re.sub(r"[\t]*", "", facesData).strip().split("\n")
-				
+				faces =  re.sub(r"[\t]*", "", facesData).strip().split("\n")				
 				# get face components 
 				currentMode = "f"
 				currentModeB = "f"
@@ -393,9 +392,11 @@ class MayaAsciiParser():
 					if 'mc'	in ff:
 						currentMode = 'mc'
 						# add face index where this thing lines up with
-						carray = [findex]+list(map(int,ff.split(" ")[2:]))
-						cindex = len(colors)
-						colors.append(carray)
+						carray = list(map(int,ff.split(" ")[1:]))								
+						try:
+							colors[findex].append(carray)
+						except:
+							colors[findex] = [carray]
 						
 					elif 'h' in ff:
 						# Faces can have multiple holes						
@@ -407,7 +408,6 @@ class MayaAsciiParser():
 						hindex = len(holes)
 						holes.append(harray)
 
-						#faceHole[findex] = list(map(int,ff.split(" ")[1:]))
 						
 					elif 'f' in ff:
 						currentMode = 'f'	
@@ -429,12 +429,11 @@ class MayaAsciiParser():
 							try:
 								uvsetsHoles[findex].append(muarray)
 							except:
-								uvsetsHoles[findex] = [muarray]
-						
+								uvsetsHoles[findex] = [muarray]						
 					
 					elif currentMode == 'mc':
 						carray = list(map(int,ff.split(" ")[1:]))
-						colors[cindex] = colors[cindex] + carray
+						colors[findex][-1] += carray
 						
 					elif currentMode == 'h':
 						harray = list(map(int,ff.split(" ")[1:]))						
@@ -509,6 +508,10 @@ class MayaAsciiParser():
 		for e in range(edgeCount):			
 			allEdges = allEdges + edges[e][0:2]							
 
+		
+		if faceCount == 0:
+			faceCount = len(fs)				
+
 		for f in range(faceCount):						
 			fd = fs[f]# fs[f].split(" ")
 			pcount = fd[0]#int(fd[1])									
@@ -529,42 +532,10 @@ class MayaAsciiParser():
 				edgeIDList.append(edgeID)
 
 			hcount = 0	
-			'''
-			try:
-				hcount = faceHole[f][0]
-				holeedges = faceHole[f][1:]				
-			except:
-				hcount = 0		
-
-			if(hcount > 0):
-				# this is WEIRD. to start a hole the vertexes needs to loop again
-				
-				edgeID,flipped = self.getEdgeID(fd[1])		
-
-				if flipped:					
-					faceVIDs[eid] = int(edges[edgeID][1])
-					allEdgeFaceDesc.append(1) 					
-				else:
-					faceVIDs[eid] = int(edges[edgeID][0])
-					allEdgeFaceDesc.append(0) 	
-								
-				edgeIDList.append(edgeID)
-				
-				for h in range(hcount+1):
-					hh = h % hcount # just like the perimiter the hole has to close					
-					edgeID,flipped = self.getEdgeID(holeedges[hh])
-					if flipped:
-						faceVIDs.append(int(edges[edgeID][1]))
-						allEdgeFaceDesc.append(1) 					
-					else:
-						faceVIDs.append(int(edges[edgeID][0]))
-						allEdgeFaceDesc.append(0) 											
-					edgeIDList.append(edgeID)				
-				# finish hole				
-				hcount += 2
-			'''
+			
 			allEdgeConnectionCount.append(pcount+hcount)	
 			allFacesVIDs = allFacesVIDs + faceVIDs
+			faceVertexIDs.append(faceVIDs)
 			allEdgeFaceConnects = allEdgeFaceConnects + edgeIDList
 					
 		'''	
@@ -578,7 +549,7 @@ class MayaAsciiParser():
 				parentName,groupOBJ = t				
 				if(parentName == meshparent):					
 					parent = groupOBJ
-					
+		
 		mesh.create( verts , allEdges , allEdgeConnectionCount , allEdgeFaceConnects , allEdgeFaceDesc,  parent=parent.object())		
 		
 		#add holes
@@ -664,7 +635,6 @@ class MayaAsciiParser():
 			allNormals = oMaya.MVectorArray(normals)						
 			#condense the perFace vertex normals to a per Vertex shared normals.			
 			allFacesVIDs = oMaya.MIntArray(allFacesVIDs)
-
 			# this doesn't work.  setFaceVertexNormals is bugged
 			#
 			# mesh.setFaceVertexNormals(allNormals,allFaceIDs,allFacesVIDs)		
@@ -686,11 +656,101 @@ class MayaAsciiParser():
 		mesh.cleanupEdgeSmoothing()		
 		mesh.updateSurface()		
 		meshName = mesh.name()
+
+		colorDictionary = dict()
+
 		for m in range(len(otherAttribs)):
 			refabstring = otherAttribs[m].replace('".', '"{0}.'.format(meshName)).strip()	
-			mel.eval(refabstring)
+			refabstring = re.sub(r"[\n\t;]*", "", refabstring)
+			if ('.colorName' in refabstring  and '.colorSet' in refabstring) or ('.clsn'in refabstring and '.clst' in refabstring):
+				colorName = self.getAttributeValue(refabstring,'-type "string" "',';')
+				if '.colorName' in refabstring:
+					colorSetIndex = int(self.getAttributeValue(refabstring,'.colorSet[','].colorName"'))				
+				else:
+					colorSetIndex = int(self.getAttributeValue(refabstring,'.clst[','].clsn"'))						
+				if colorSetIndex not in colorDictionary.keys():
+					colorDictionary[colorSetIndex] = [colorName,4,oMaya.MColorArray(),oMaya.MColorArray(),list(),list()] # 4 channels , ColorPoints, Output Colors, OutputFaceIDs , OutputVertexIDs
+			if ('.colorSet' in refabstring and '.representation' in refabstring) or ('.clst' in refabstring and '.rprt' in refabstring):
+				if 'representation' in refabstring:
+					colorSetIndex = int(self.getAttributeValue(refabstring,'.colorSet[','].representation'))
+					colorRep = self.getAttributeValue(refabstring+";",'].representation" ',";")
+				else:
+					colorSetIndex = int(self.getAttributeValue(refabstring,'.clst[','].rprt'))
+					colorRep = self.getAttributeValue(refabstring+";",'].rprt" ',";")
+				
+				try:					
+					colorDictionary[colorSetIndex][1] = int(colorRep)
+				except:
+					# sometimes if there is a construction history for the color set the representation becomes a place holder.
+					pass
+			elif ('.colorSetPoints' in refabstring) or ('.clsp' in refabstring):
+				if '.colorSetPoints' in refabstring:
+					colorSetIndex = int(self.getAttributeValue(refabstring,'.colorSet[','].colorSetPoints'))
+				else:
+					colorSetIndex = int(self.getAttributeValue(refabstring,'.clst[','].clsp'))
+				colorValues = self.getAttributeValue(refabstring+";",']"  ' ,";").split(" ")
+				
+				#tokenize array of numbers
+				colorRep = colorDictionary[colorSetIndex][1]
+				colorIndexes = int(len(colorValues) / colorRep)
+				colorLists = []
+				for c in range(colorIndexes):
+					mColor = oMaya.MColor()
+					mColor.r = float(colorValues[ (c * colorRep) + 0 ])
+					mColor.g = float(colorValues[ (c * colorRep) + 1 ])
+					mColor.b = float(colorValues[ (c * colorRep) + 2 ])
+					if colorRep > 3:
+						mColor.a = float(colorValues[ (c * colorRep) + 3 ])					
+					colorLists.append(mColor)
+				colorDictionary[colorSetIndex][2] = colorLists
+				continue
 
-		# Color sets			
+			try:
+				mel.eval(refabstring)
+			except Exception as e:
+				print("Cant set attribute ",refabstring)
+				print(e)				
+				#raise Exception("Error mesh attrib",refabstring)
+
+		# Color sets	
+		defaultColor = mesh.currentColorSetName()
+		colorSetPoints = 2		
+		outputColors = 3
+		outputColorFaces = 4
+		outputColorVertexes = 5
+		
+
+		for faceID,value in colors.items():					
+			faceColors = value			
+			vertexIDs = faceVertexIDs[faceID]	
+			for fc in range(len(faceColors)):
+				colorSetIndex = int(faceColors[fc][0])
+				colorCount = faceColors[fc][1]
+				colorItems = faceColors[fc][2:]		
+				
+				for fi in range(len(colorItems)):
+					vertID = vertexIDs[fi]	
+					
+					if colorItems[fi] != -1:						
+						mColor = colorDictionary[colorSetIndex][colorSetPoints][ colorItems[fi] ] 						
+						colorDictionary[colorSetIndex][outputColors].append(mColor)
+						colorDictionary[colorSetIndex][outputColorVertexes].append(vertID)				
+						colorDictionary[colorSetIndex][outputColorFaces].append(faceID)							
+
+		for colorSetIndex,value in colorDictionary.items():					
+			mesh.setCurrentColorSetName( colorDictionary[colorSetIndex][0])					
+			mesh.clearColors()
+			
+			if len(colorDictionary[colorSetIndex][outputColors]) > 0:				
+				mesh.setFaceVertexColors( 
+					colorDictionary[colorSetIndex][outputColors], 
+					colorDictionary[colorSetIndex][outputColorFaces],
+					colorDictionary[colorSetIndex][outputColorVertexes])
+			mesh.updateSurface()
+		
+		mesh.setCurrentColorSetName( defaultColor )		
+				
+				
 
 		return mesh, materialFaceAssignment, tweaks
 	
