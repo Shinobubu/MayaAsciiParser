@@ -87,7 +87,8 @@ class MayaAsciiParser():
 			@param[in]: Line of maya ascii
 			@param[out]: Returns a single string
 		'''
-		splitstring = str.splitlines()		
+		splitstring = str.split('\n')		
+		
 		splitstring = splitstring[0].split(" ")
 		return splitstring[0]
 	
@@ -98,7 +99,8 @@ class MayaAsciiParser():
 			@param[in]: Line of maya ascii
 			@param[out]: Returns a single string
 		'''
-		splitstring = str.splitlines()		
+		splitstring = str.split('\n')	
+		
 		namefound = splitstring[0]
 		if "-p \"" not in namefound and "-parent \"" not in namefound:
 			return ""
@@ -116,7 +118,9 @@ class MayaAsciiParser():
 			@param[in]: Line of maya ascii
 			@param[out]: Returns a single string
 		'''
-		splitstring = str.splitlines()	
+		splitstring = str.split('\n')
+		if len(splitstring) == 0:
+			return None
 		namefound = splitstring[0]
 		start = "-n \""
 		if ("-name" in namefound):
@@ -277,7 +281,7 @@ class MayaAsciiParser():
 		mus = [] # uvfaces		
 		holes = [] # holes		
 		colors = dict() # colors		
-		
+		vertexIDList = []
 		materialFaceAssignment = dict()
 		tweaks = []
 				
@@ -639,12 +643,9 @@ class MayaAsciiParser():
 		# if normals counts equal to vertex count it means per vertex normals
 		if len(normals) == vertCount:
 			for aindex in range(len(normals)):
-				try:
-					mesh.setVertexNormal(normals[aindex],aindex)
-				except Exception as e:
-					pass
-					#print("missing normals ",aindex)
-					#raise Exception(" failed normals ",e," ",normals)			
+				vertexIDList.append(aindex)
+			mesh.setVertexNormals(normals,vertexIDList)
+			
 		else:
 			if len(normals) > 0:			
 				allNormals = oMaya.MVectorArray(normals)						
@@ -656,13 +657,16 @@ class MayaAsciiParser():
 				#
 				# this is the work around to do it per vertex
 				#
+				vertNormals = []
 				for aindex in range(len(allFacesVIDs)):
-					vindex = allFacesVIDs[aindex]		
-					try:		
-						mesh.setVertexNormal(allNormals[aindex],vindex)
+					vindex = allFacesVIDs[aindex]	
+					try:
+						vertNormals.append(allNormals[aindex])
+						vertexIDList.append(vindex)	
 					except:
 						pass
-						#print("vindex missing ",vindex)
+						
+				mesh.setVertexNormals(vertNormals,vertexIDList)
 					
 			
 					
@@ -912,10 +916,11 @@ class MayaAsciiParser():
 		for mesh in self.__meshes__:
 			meshOBJ = mesh[1]
 			tweaks = mesh[4]	
-			meshname = meshOBJ.name()						
+			meshname = meshOBJ.name()		
+			refabstring = ""				
 			for line in tweaks:
-				refabstring = line.replace('".', '"{0}.'.format(meshname)).strip()					
-				mel.eval(refabstring)
+				refabstring += line.replace('".', '"{0}.'.format(meshname)).strip()+"\n"
+			mel.eval(refabstring)
 			
 			
 	
@@ -933,6 +938,8 @@ class MayaAsciiParser():
 			shaderName = self.getNodeName(shaderRaw)
 			shaderType = self.getTypeName(shaderRaw)
 			print("Creating ",shaderGroupName,shaderName,shaderType)
+			if(shaderName == ""):
+				raise Exception("WTF not a valid shader",parsedlist[i])
 			material = cmds.shadingNode(shaderType, name=shaderName, asShader=True)			
 			sg = cmds.sets(name=shaderGroupName,empty=True,renderable=True,noSurfaceShader=True)		
 			cmds.connectAttr("%s.outColor" % material, "%s.surfaceShader" % sg)			
@@ -1093,13 +1100,17 @@ class MayaAsciiParser():
 		'''	
 		notFoundList = []
 		alreadyExists = []
-		for s in shaderlist:
-			shaderGroupName = self.getNodeName(s[0])
-			shaderName = self.getNodeName(s[1])
+		for s in shaderlist:						
+			shaderGroupName = self.getNodeName(s[0])			
+			shaderName = self.getNodeName(s[1])			
+			print("Looking for ",shaderGroupName,shaderName)			
 			self.__namedictionary__[shaderGroupName] = shaderGroupName
 			self.__namedictionary__[shaderName] = shaderName
-			shaderType = self.getTypeName(s[1])
-			if cmds.objExists( shaderGroupName )  and cmds.objExists( shaderName ) and cmds.objectType( shaderGroupName ) == "shadingEngine" and cmds.objectType( shaderName) == shaderType:				
+			shaderType = self.getTypeName(s[1])		
+			if shaderName == "":
+				if cmds.objExists(shaderGroupName):
+					alreadyExists.append( (shaderGroupName,shaderName,shaderType) )
+			elif cmds.objExists( shaderGroupName )  and cmds.objExists( shaderName ) and cmds.objectType( shaderGroupName ) == "shadingEngine" and cmds.objectType( shaderName) == shaderType:				
 				alreadyExists.append( (shaderGroupName,shaderName,shaderType) )
 			else:				
 				notFoundList.append(s)
@@ -1265,7 +1276,10 @@ class MayaAsciiParser():
 						skinaAttrib = self.getAttributeValue(skinaAttrib,'w" ',';')	
 						weightslist  += list(filter(str.strip, skinaAttrib.split(" ") )) 
 					else:
-						mel.eval(skinaAttrib)
+						try:
+							mel.eval(skinaAttrib)
+						except:							
+							pass
 			# now parse the weights list																		
 			skinobjects.append( (newName,weightslist) )
 			
@@ -1321,6 +1335,7 @@ class MayaAsciiParser():
 		'''
 		outblend = cmds.getAttr('shapeEditorManager.outBlendShapeVisibility',multiIndices=True)
 		shapeDirectory = cmds.getAttr('shapeEditorManager.blendShapeDirectory[0].childIndices')
+		shapeDirectory = []
 		if outblend == None:
 			outblend = []
 			shapeDirectory = []
