@@ -197,6 +197,26 @@ class MayaAsciiParser():
 		return "",-1
 			
 
+	def getPlugIndex(self,line,plugAddress,plugindex):
+		'''
+			Returns Attribute plug index based on connections
+			example:  setAttr -av ".iog[0].og[0].gco";
+			self.getPlugIndex(lines,"iog.og.gcl",1) #.iog[0].og[0].gcl"'
+			@param[in] iog.og.gco (connection hiearchy)
+			@param[in] 1 (plug connection to get)
+		'''
+		plugs = plugAddress.split(".")
+		needle = re.findall('"([^"]*)"',line)
+		needlesplit = needle[0].split(".")
+		match = True
+		if len(plugs) != len(needlesplit):
+			return None
+		for p in range(len(plugs)):
+			if plugs[p] not in needlesplit[p]:
+				return None		
+		return int( re.findall(r"\[(.*?)\]", needlesplit[plugindex] )[0] )
+		
+
 	def getAttributeValue(self,line,attributeLabel,end=" "):
 		'''
 			Returns Attribute value tagged with its label -attributename "attributevalue".
@@ -498,13 +518,15 @@ class MayaAsciiParser():
 				#materialData = re.sub(r"[\n\tf\[\]\"]*", "", materialData) # convert "[32:50]" to 32:50
 				materialData = re.sub(r"[\n\t\"]*", "", materialData) # convert "[32:50]" to 32:50
 				materialData = materialData.split(" ")
-				materialFaceSize = int(materialData.pop(0))
+				#materialFaceSize = int(materialData.pop(0))
 				
 				materialIndex = 0
-				if '".instObjGroups[0].objectGroups' in lines:
-					materialIndex = int(self.getAttributeValue(lines,'.instObjGroups[0].objectGroups[','].objectGrpCompList"'))
+				if self.getPlugIndex(lines,".instObjGroups.objectGroups.objectGrpCompList",2) != None:					
+					materialIndex = self.getPlugIndex(lines,".instObjGroups.objectGroups.objectGrpCompList",2)
+				elif self.getPlugIndex(lines,".iog.og.gcl",2) != None :										
+					materialIndex = self.getPlugIndex(lines,".iog.og.gcl",2)
 				else:
-					materialIndex = int(self.getAttributeValue(lines,'.iog[0].og[','].gcl"'))				
+					continue
 				materialFaceAssignment[materialIndex] = materialData
 				continue
 
