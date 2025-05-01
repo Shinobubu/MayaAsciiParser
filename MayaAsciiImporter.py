@@ -20,7 +20,7 @@ def maya_useNewAPI():
 
 
 _pluginName_ = 'MayaAsciiImporter'
-_author_ = 'Xyriz Arceo'
+_author_ = 'Shinobubu'
 _version_ = '1.45'
 _apiVersion_ = 'Any'
 
